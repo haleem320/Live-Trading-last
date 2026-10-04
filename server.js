@@ -106,12 +106,12 @@ const TARGET_LEVERAGE = Math.max(1, Number(process.env.TARGET_LEVERAGE || 20));
 const CONFIGURED_OPEN_TYPE = Math.max(1, Math.min(2, Number(process.env.OPEN_TYPE || 1)));
 const CONFIGURED_POSITION_MODE = Math.max(1, Math.min(2, Number(process.env.POSITION_MODE || 2)));
 const STOP_LOSS_PCT = Number(process.env.STOP_LOSS_PCT || 0.02);
-const CONFIGURED_TAKE_PROFIT_PCT = Number(process.env.TAKE_PROFIT_PCT || 0.035);
+const CONFIGURED_TAKE_PROFIT_PCT = Number(process.env.TAKE_PROFIT_PCT || 0.02);
 const FORCE_AUTO_STOP_LOSS = String(process.env.FORCE_AUTO_STOP_LOSS ?? "true").toLowerCase() === "true";
 const MANUAL_STOP_LOSS = FORCE_AUTO_STOP_LOSS ? false : String(process.env.MANUAL_STOP_LOSS ?? "false").toLowerCase() === "true";
-// Runner mode: use a distant 10% protective TP so strong moves are not cut at 2.5%.
+// Initial TP is 2%; adaptive TP may extend it up to the configured maximum when momentum is strong.
 // From +2.5%, the existing trailing/break-even manager protects the profit.
-const TAKE_PROFIT_PCT = Math.max(0.025, Math.min(0.04, CONFIGURED_TAKE_PROFIT_PCT));
+const TAKE_PROFIT_PCT = Math.max(0.02, Math.min(0.04, CONFIGURED_TAKE_PROFIT_PCT));
 const ADAPTIVE_TP_ENABLED = String(process.env.ADAPTIVE_TP_ENABLED ?? "true").toLowerCase() === "true";
 const ADAPTIVE_TP_START_PCT = TAKE_PROFIT_PCT;
 const ADAPTIVE_TP_MAX_PCT = Math.max(TAKE_PROFIT_PCT, Math.min(0.04, Number(process.env.ADAPTIVE_TP_MAX_PCT || 0.04)));
@@ -149,12 +149,12 @@ const TRADE_MANAGER_INTERVAL_SECONDS = Math.max(5, Number(process.env.TRADE_MANA
 const AUTO_RUN_STALE_MS = Math.max(60*1000, Number(process.env.AUTO_RUN_STALE_MS || 8*60*1000));
 const BREAK_EVEN_ENABLED =
   !MANUAL_STOP_LOSS && String(process.env.BREAK_EVEN_ENABLED ?? "true").toLowerCase() === "true";
-const BREAK_EVEN_TRIGGER_PCT = Math.max(0, Number(process.env.BREAK_EVEN_TRIGGER_PCT || 0.020));
+const BREAK_EVEN_TRIGGER_PCT = Math.max(0, Number(process.env.BREAK_EVEN_TRIGGER_PCT || 0.010));
 const BREAK_EVEN_OFFSET_PCT = Math.max(0, Number(process.env.BREAK_EVEN_OFFSET_PCT || 0.0015));
 const TRAILING_STOP_ENABLED =
   !MANUAL_STOP_LOSS && String(process.env.TRAILING_STOP_ENABLED ?? "true").toLowerCase() === "true";
-const TRAILING_TRIGGER_PCT = 0.025;
-const TRAILING_STOP_PCT = Math.max(0.001, Number(process.env.TRAILING_STOP_PCT || 0.010));
+const TRAILING_TRIGGER_PCT = Math.max(0.015, Number(process.env.TRAILING_TRIGGER_PCT || 0.015));
+const TRAILING_STOP_PCT = Math.max(0.003, Number(process.env.TRAILING_STOP_PCT || 0.008));
 const MIN_STOP_DISTANCE_PCT = Math.max(0.0005, Number(process.env.MIN_STOP_DISTANCE_PCT || 0.001));
 const MAX_OPEN_POSITIONS = Math.max(1, Number(process.env.MAX_OPEN_POSITIONS || (SMART_PULLBACK_PROFILE ? 6 : 6)));
 const MAX_SAME_DIRECTION_POSITIONS = Math.max(1, Number(process.env.MAX_SAME_DIRECTION_POSITIONS || (SMART_PULLBACK_PROFILE ? 6 : 6)));
@@ -1971,8 +1971,10 @@ async function managePosition(symbol, position) {
     console.log("ADAPTIVE TP CHECK ERROR", JSON.stringify({symbol,direction,positionId:positionIdOf(position),error:e.message}));
   }
 
-  // Profit protection: once the trade has moved +2%, first move SL just above
-  // entry. From +3%, trail behind price. Never move a stop backwards.
+  // Profit protection: once the trade moves +1%, move SL just above entry.
+  // From +1.5%, trail behind the market. The stop only moves in the protective
+  // direction, so when the market reverses it stays at the highest/lowest
+  // protected level and can close the position with reduced loss or profit.
   try {
     let candidateStop = null;
     if (TRAILING_STOP_ENABLED && profitPct >= TRAILING_TRIGGER_PCT) {
